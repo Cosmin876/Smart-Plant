@@ -3,32 +3,35 @@
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
 #include <DHT.h>
-
-//Initialize the LCD display
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-
 
 char auth[] = "21o8KyuqMF7n69400Ga0mh48M0w8W-88";  //Blynk Auth token
 char ssid[] = "HUAWEI nova 9";                     //WIFI SSID
 char pass[] = "Cosmin2007";                        //WIFI Password
-
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, 10800); 
 DHT dht(D4, DHT11);  //(DHT sensor pin,sensor type)  D4 DHT11 Temperature Sensor
 BlynkTimer timer;
-const int x = 27;
+const int x = 65 ;
+int sensorState = 0;
 //Define component pins
 #define soil A0  //A0 Soil Moisture Sensor
 #define PIR D5   //D5 PIR Motion Sensor
+#define Water D0
 int PIR_ToggleValue;
 
 void checkPhysicalButton();
 int relay1State = LOW;
 int ok = 0;
 int pushButton1State = HIGH;
+#define RELAY_PIN_2 D6
 #define RELAY_PIN_1 D3    //D3 Relay
 #define PUSH_BUTTON_1 D7  //D7 Button
 #define VPIN_BUTTON_1 V12
 #define VPIN_BUTTON_2 V2
-#define Timer V4
+
 
 //Create three variables for pressure
 double T, P;
@@ -38,15 +41,20 @@ char status;
 
 void setup() {
   Serial.begin(9600);
-  lcd.init();
-  lcd.backlight();
+  WiFi.begin(ssid, pass);
   lcd.clear();
+  lcd.begin();
+  lcd.backlight();
   pinMode(PIR, INPUT);
+  pinMode(Water, INPUT);
 
   pinMode(RELAY_PIN_1, OUTPUT);
   digitalWrite(RELAY_PIN_1, LOW);
+  pinMode(RELAY_PIN_2, OUTPUT);
+  digitalWrite(RELAY_PIN_2, LOW);
   pinMode(PUSH_BUTTON_1, INPUT_PULLUP);
   digitalWrite(RELAY_PIN_1, relay1State);
+  digitalWrite(RELAY_PIN_2, relay1State);
 
 
   Blynk.begin(auth, ssid, pass, "blynk.cloud", 80);
@@ -66,6 +74,7 @@ void setup() {
   timer.setInterval(100L, soilMoistureSensor);
   timer.setInterval(100L, DHT11sensor);
   timer.setInterval(500L, checkPhysicalButton);
+  timeClient.begin();
 }
 
 
@@ -95,18 +104,24 @@ void DHT11sensor() {
 void soilMoistureSensor() {
   int value = analogRead(soil);
   value = map(value, 0, 1024, 0, 100);
-  value = (value - 100) * -1;
 
   Blynk.virtualWrite(V3, value);
   if (ok) {
-    if (value < x && Timer==1) {
+    if (value < x ) {
+      if(timeClient.getHours()>=9 && timeClient.getHours()<=21){
       relay1State = HIGH;
       Blynk.virtualWrite(VPIN_BUTTON_1, relay1State);
+      if(sensorState==1)
       digitalWrite(RELAY_PIN_1, relay1State);
+      else
+      digitalWrite(RELAY_PIN_2, relay1State);}
     } else {
       relay1State = LOW;
       Blynk.virtualWrite(VPIN_BUTTON_1, relay1State);
+      if(sensorState==1)
       digitalWrite(RELAY_PIN_1, relay1State);
+      else
+      digitalWrite(RELAY_PIN_2, relay1State);
     }
   } else {
     if (value < x)
@@ -143,7 +158,10 @@ BLYNK_CONNECTED() {
 
 BLYNK_WRITE(VPIN_BUTTON_1) {
   relay1State = param.asInt();
-  digitalWrite(RELAY_PIN_1, relay1State);
+  if(sensorState==1)
+      digitalWrite(RELAY_PIN_1, relay1State);
+  else
+      digitalWrite(RELAY_PIN_2, relay1State);
 }
 BLYNK_WRITE(VPIN_BUTTON_2) {
   ok = param.asInt();
@@ -155,7 +173,10 @@ void checkPhysicalButton() {
 
       // Toggle Relay state
       relay1State = !relay1State;
+      if(sensorState==1)
       digitalWrite(RELAY_PIN_1, relay1State);
+      else
+      digitalWrite(RELAY_PIN_2, relay1State);
 
       // Update Button Widget
       Blynk.virtualWrite(VPIN_BUTTON_1, relay1State);
@@ -168,6 +189,8 @@ void checkPhysicalButton() {
 
 
 void loop() {
+  timeClient.update();
+  sensorState = digitalRead(D0);
   if (PIR_ToggleValue == 1) {
     lcd.setCursor(5, 1);
     lcd.print("M:ON ");
